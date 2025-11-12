@@ -7,6 +7,7 @@ import {Download, Loader2} from "lucide-react"
 import * as htmlToImage from "html-to-image"
 import download from "downloadjs"
 
+
 interface BulletinData {
   date: string
   peakTime: string
@@ -61,7 +62,6 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
     return hour < 12 ? "BUỔI SÁNG" : "BUỔI CHIỀU";
   };
 
-  // --- 📸 Export single ---
   const handleDownload = async () => {
     if (!bulletinRef.current) return;
     setIsExporting(true);
@@ -98,6 +98,38 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
     if (!current || !current.data) return;
     setCurrentData(current.data);
   }, [bulletins, currentIndex]);
+
+  const depth = getInundationDepth(); // độ sâu ngập lụt, ví dụ: 35
+  const region = currentData.region;
+
+  const imageLevels: Record<string, number[]> = {
+    "KV1": [10, 15, 20, 25, 30, 35, 40],
+    "KV3": [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70],
+  };
+
+  const getImageByDepth = (depth: string, region: string) => {
+    const numericDepth = parseFloat(depth);
+
+    const available = imageLevels[region] || [];
+    if (available.length === 0) return null;
+
+    const lowerOrEqual = available.filter((val) => val <= numericDepth);
+
+    const selected = lowerOrEqual.length > 0 ? Math.max(...lowerOrEqual) : Math.min(...available);
+
+    return `${window.location.origin}/MucNuoc/${region}/${selected}CM.jpg`;
+  };
+
+
+  const getWaterLinePosition = (depth: string) => {
+    let numericDepth = parseFloat(depth);
+    const regionOffset = currentData.region === "KV1" ? 0 : 1;
+    const top = (-19 / 30) * numericDepth + 90 - regionOffset;
+    return `${top}%`;
+  };
+
+  const imgSrc = getImageByDepth(depth, region);
+  const waterLineTop = getWaterLinePosition(depth);
 
 
   useEffect(() => {
@@ -153,7 +185,7 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
       smaller: 20,
       tiny: 18,
       smallest: 16,
-      depth: 48,
+      depth: 40,
       footer: 22
     },
 
@@ -269,7 +301,7 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   x="50%"
                   y={config.pct(45, 'h')}
                   fontFamily="Arial, sans-serif"
-                  fontSize={config.fontSize.title}
+                  fontSize={config.fontSize.subtitle}
                   fontWeight="bold"
                   fill="#FFD670"
                   textAnchor="middle"
@@ -388,7 +420,18 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   fontSize={config.fontSize.normal}
                   fill="#333"
                 >
-                  Độ ngập sâu trung bình tại thời điểm đỉnh triều
+                  Độ ngập sâu trung bình tại thời điểm
+                  {" "}
+                  <tspan
+                    fill="#DC143C"
+                    fontWeight="bold"
+                    fontFamily="Arial, sans-serif"
+                    fontSize={config.fontSize.small}>
+                    đỉnh
+                  </tspan>
+                  {" "}
+                  triều
+
                 </text>
                 <text
                   x={config.pct(90)}
@@ -397,14 +440,24 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   fontSize={config.fontSize.normal}
                   fill="#0d4b59"
                 >
-                  lúc {data.peakTime}:
+                  {parseFloat(currentData.waterLevel.match(/[\d.]+/)?.[0] || "0") / 100}m
+                  lúc
+                  {" "}
+                  <tspan
+                    fill="#DC143C"
+                    fontWeight="bold"
+                    fontFamily="Arial, sans-serif"
+                    fontSize={config.fontSize.normal}>
+                    {data.peakTime}
+                  </tspan>
+                  :
                 </text>
 
                 {/* Depth Box */}
                 <rect
-                  x={config.pct(215)}
+                  x={config.pct(165)}
                   y={config.pct(380, 'h')}
-                  width={config.pct(250)}
+                  width={config.pct(350)}
                   height={config.pct(80, 'h')}
                   rx="5"
                   fill="none"
@@ -420,14 +473,14 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   fill="#DC143C"
                   textAnchor="middle"
                 >
-                  ~ {getInundationDepth()} cm
+                  ~ {getInundationDepth()} cm (+/- 6cm)
                 </text>
 
                 <text
                   x={config.pct(90)}
                   y={config.pct(490, 'h')}
                   fontFamily="Arial, sans-serif"
-                  fontSize={config.fontSize.normal}
+                  fontSize={config.fontSize.medium}
                   fill="#0d4b59"
                   fontStyle="italic"
                 >
@@ -464,7 +517,7 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       overflow: "hidden",
                     }}>
                     <img
-                      src={`${window.location.origin}/assets/img.jpg`}
+                      src={`${window.location.origin}/assets/map${currentData.region}.png`}
                       crossOrigin="anonymous"
                       style={{
                         width: "100%",
@@ -474,6 +527,71 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       }}
                       alt="Flood area"
                     />
+
+                    <img
+                      src={imgSrc || ''}
+                      crossOrigin="anonymous"
+                      style={{
+                        position: "absolute",
+                        top: "50%",
+                        right: "5%", // cách mép phải một chút
+                        transform: "translateY(-50%)", // canh giữa theo chiều dọc
+                        width: "33%", // ảnh nhỏ lại, chỉ chiếm khoảng 1/4 chiều ngang
+                        height: "auto",
+                        objectFit: "contain",
+                        pointerEvents: "none",
+                      }}
+                      alt="Water level overlay"
+                    />
+                  </div>
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: waterLineTop, // vị trí mực nước
+                      right: "6%",
+                      width: "15%",
+                      height: "2px",
+                      backgroundColor: "red",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                    }}
+                  />
+
+                  {/* Text chú thích mực nước */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: `calc(${waterLineTop} - 4%)`,
+                      right: "3.5%",
+                      width: "25%",
+                      textAlign: "center",
+                      color: "red",
+                      fontWeight: "bold",
+                      textShadow: '0.75px 0 #fff, -0.75px 0 #fff, 0 0.75px #fff, 0 -0.75px #fff, 0.75px 0.5px #fff, -0.75px -0.75px #fff, 0.75px -0.75px #fff, -0.75px 0.75px #fff',
+                      fontSize: "14px",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {getInundationDepth()} cm
+                  </div>
+
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: `calc(${waterLineTop} + 4%)`,
+                      right: "0%",
+                      width: "25%",
+                      textAlign: "center",
+                      color: "#DC1417",
+                      fontWeight: "bold",
+                      textShadow: '0.75px 0 #fff, -0.75px 0 #fff, 0 0.75px #fff, 0 -0.75px #fff, 0.75px 0.5px #fff, -0.75px -0.75px #fff, 0.75px -0.75px #fff, -0.75px 0.75px #fff',
+                      fontSize: "14px",
+                      transform: "translateY(-50%)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    Mức dự báo
                   </div>
                 </foreignObject>
 
@@ -495,7 +613,7 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   x={config.pct(600)}
                   y={config.pct(840, 'h')}
                   fontFamily="Arial, sans-serif"
-                  fontSize={config.fontSize.small}
+                  fontSize={config.fontSize.smallest}
                   fill="#000"
                   textAnchor="middle"
                   fontStyle="italic"

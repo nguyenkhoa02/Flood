@@ -90,6 +90,7 @@ export default function ResultsPage() {
                   console.log("Bulletin downloaded")
                 }}
                 bulletins={bulletins}
+                currentIndex={0}
               />
             )}
           </div>

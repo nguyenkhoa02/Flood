@@ -16,7 +16,7 @@ export async function processFileWithAI(formData: FormData): Promise<BackendResp
       throw new Error("No file provided")
     }
 
-    const apiKey = process.env.NEXT_PUBLIC_API_KEY
+    const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY
     if (!apiKey) {
       throw new Error("API key not configured")
     }

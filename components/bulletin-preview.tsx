@@ -1,12 +1,11 @@
 "use client"
 
-import {useEffect, useRef, useState} from "react"
+import {useEffect, useLayoutEffect, useRef, useState} from "react"
 import {Card, CardContent, CardHeader, CardTitle} from "@/components/ui/card"
 import {Button} from "@/components/ui/button"
 import {Download, Loader2} from "lucide-react"
-import * as htmlToImage from "html-to-image"
 import download from "downloadjs"
-
+import domtoimage from 'dom-to-image-more'
 
 interface BulletinData {
   date: string
@@ -65,14 +64,48 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
   const handleDownload = async () => {
     if (!bulletinRef.current) return;
     setIsExporting(true);
+
     try {
-      const fileName = `bulletin-${currentData.date}-${currentData.location}-${currentData.region}.png`;
-      const dataUrl = await htmlToImage.toPng(bulletinRef.current, {
+      const svg = bulletinRef.current.querySelector("svg");
+      if (!svg) {
+        alert("Không tìm thấy phần tử SVG trong bulletinRef");
+        setIsExporting(false);
+        return;
+      }
+
+      const clone = svg.cloneNode(true) as SVGSVGElement;
+
+      const viewBoxAttr = clone.getAttribute("viewBox");
+      const viewBox = viewBoxAttr
+        ? viewBoxAttr.split(" ").map(Number)
+        : [0, 0, 1200, 900];
+      const [, , vbWidth, vbHeight] = viewBox;
+
+      clone.setAttribute("width", `${vbWidth}`);
+      clone.setAttribute("height", `${vbHeight}`);
+      clone.style.width = `${vbWidth}px`;
+      clone.style.height = `${vbHeight}px`;
+      clone.style.border = "none";
+
+      const tempWrapper = document.createElement("div");
+      tempWrapper.style.background = "#fff";
+      tempWrapper.style.width = `${vbWidth}px`;
+      tempWrapper.style.height = `${vbHeight}px`;
+      tempWrapper.appendChild(clone);
+      document.body.appendChild(tempWrapper);
+
+      const dataUrl = await domtoimage.toPng(tempWrapper, {
         quality: 1.0,
-        backgroundColor: "#ffffff",
-        pixelRatio: 2,
+        bgcolor: "#ffffff",
+        width: vbWidth,
+        height: vbHeight,
+        cacheBust: true,
       });
+
+      const fileName = `bulletin-${currentData.date}-${currentData.location}-${currentData.region}.png`;
       download(dataUrl, fileName);
+
+      document.body.removeChild(tempWrapper);
       onDownload?.();
     } catch (error) {
       console.error("❌ Lỗi xuất bản tin:", error);
@@ -82,7 +115,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
     }
   };
 
-  // --- 📦 Export all (tuần tự, không lặp ảnh) ---
+
+
   const handleDownloadAll = () => {
     if (!bulletins || bulletins.length === 0) {
       alert("Không có bản tin nào để tải xuống.");
@@ -116,7 +150,7 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
     const lowerOrEqual = available.filter((val) => val <= numericDepth);
 
     const selected = lowerOrEqual.length > 0 ? Math.max(...lowerOrEqual) : Math.min(...available);
-
+    console.log(selected);
     return `${window.location.origin}/MucNuoc/${region}/${selected}CM.jpg`;
   };
 
@@ -132,27 +166,57 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
   const waterLineTop = getWaterLinePosition(depth);
 
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!exportQueue || exportQueue.length === 0) return;
 
     const exportNext = async () => {
       const [current, ...rest] = exportQueue;
       setCurrentData(current);
 
-      // 🔄 Đợi React render hoàn tất trước khi chụp
+      // 🕒 Chờ DOM và layout cập nhật hoàn tất
       await new Promise((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(resolve))
+        setTimeout(resolve, 100) // cho React & browser render xong SVG
       );
 
       if (bulletinRef.current) {
-        const fileName = `bulletin-${current.date}-${current.location}-${current.region}.png`;
-        const dataUrl = await htmlToImage.toPng(bulletinRef.current, {
-          backgroundColor: "#ffffff",
-          pixelRatio: 2,
-        });
-        download(dataUrl, fileName);
+        const svg = bulletinRef.current.querySelector("svg");
+        if (!svg) return console.error("❌ Không tìm thấy SVG");
+
+        // Clone SVG (an toàn)
+        const clone = svg.cloneNode(true) as SVGSVGElement;
+        const viewBoxAttr = clone.getAttribute("viewBox");
+        const viewBox = viewBoxAttr
+          ? viewBoxAttr.split(" ").map(Number)
+          : [0, 0, 1200, 900];
+        const [, , vbWidth, vbHeight] = viewBox;
+
+        // Container tạm
+        const tempWrapper = document.createElement("div");
+        tempWrapper.style.background = "#fff";
+        tempWrapper.style.width = `${vbWidth}px`;
+        tempWrapper.style.height = `${vbHeight}px`;
+        tempWrapper.appendChild(clone);
+        document.body.appendChild(tempWrapper);
+
+        try {
+          const dataUrl = await domtoimage.toPng(tempWrapper, {
+            quality: 1.0,
+            bgcolor: "#ffffff",
+            width: vbWidth,
+            height: vbHeight,
+            cacheBust: true,
+          });
+
+          const fileName = `bulletin-${current.date}-${current.location}-${current.region}.png`;
+          download(dataUrl, fileName);
+        } catch (err) {
+          console.error("❌ Xuất lỗi:", err);
+        } finally {
+          document.body.removeChild(tempWrapper);
+        }
       }
 
+      // Xuất tiếp
       if (rest.length > 0) {
         setExportQueue(rest);
       } else {
@@ -164,6 +228,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
 
     exportNext();
   }, [exportQueue]);
+
+
 
 
   // Dynamic sizing configuration
@@ -252,12 +318,17 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
         <div className="overflow-x-auto">
           <div className="w-full max-w-4xl bg-white rounded-lg shadow-lg overflow-hidden mx-auto">
             <div ref={bulletinRef} className={'w-full'}
+                 style={{
+                   border: 'none'
+                 }}
             >
               <svg
                 viewBox={`0 0 ${config.viewBox.width} ${config.viewBox.height}`}
                 xmlns="http://www.w3.org/2000/svg"
                 className="w-full h-auto"
-
+                style={{
+                  border: 'none'
+                }}
               >
                 <defs>
                   <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -270,10 +341,13 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   </filter>
                 </defs>
 
-                <foreignObject x="0" y="0" width="100%" height="100%">
+                <foreignObject x="0" y="0" width="100%" height="100%"
+                  style={{border: 'none'}}
+                >
                   <img
                     src="/assets/1019713_6289.jpg"
                     style={{
+                      border: 'none',
                       width: "100%",
                       height: "100%",
                       borderRadius: "10px",
@@ -508,6 +582,10 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   width={config.pct(540)}
                   height={config.pct(300, 'h')}
                   clipPath="url(#rectClip)"
+                  style={{
+                    border: 'none'
+
+                  }}
                 >
                   <div
                     style={{
@@ -515,6 +593,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       height: "100%",
                       borderRadius: "10px",
                       overflow: "hidden",
+                      border: 'none'
+
                     }}>
                     <img
                       src={`${window.location.origin}/assets/map${currentData.region}.png`}
@@ -524,8 +604,11 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                         height: "100%",
                         objectFit: "cover",
                         display: "block",
+                        border: 'none'
+
                       }}
                       alt="Flood area"
+
                     />
 
                     <img
@@ -540,6 +623,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                         height: "auto",
                         objectFit: "contain",
                         pointerEvents: "none",
+                        border: 'none'
+
                       }}
                       alt="Water level overlay"
                     />
@@ -554,6 +639,7 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       backgroundColor: "red",
                       transform: "translateY(-50%)",
                       pointerEvents: "none",
+                      border: 'none'
                     }}
                   />
 
@@ -571,6 +657,7 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       fontSize: "14px",
                       transform: "translateY(-50%)",
                       pointerEvents: "none",
+                      border: 'none'
                     }}
                   >
                     {getInundationDepth()} cm
@@ -583,12 +670,14 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       right: "0%",
                       width: "25%",
                       textAlign: "center",
-                      color: "#DC1417",
+                      color: "rgb(255, 0, 0)",
                       fontWeight: "bold",
                       textShadow: '0.75px 0 #fff, -0.75px 0 #fff, 0 0.75px #fff, 0 -0.75px #fff, 0.75px 0.5px #fff, -0.75px -0.75px #fff, 0.75px -0.75px #fff, -0.75px 0.75px #fff',
                       fontSize: "14px",
                       transform: "translateY(-50%)",
                       pointerEvents: "none",
+                      fontFamily: 'Arial, sans-serif',
+                      border: 'none'
                     }}
                   >
                     Mức dự báo
@@ -660,6 +749,10 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   y={config.pct(210, 'h')}
                   width={config.pct(460)}   // chiều rộng giới hạn text
                   height={config.pct(460)}  // chiều cao vùng chứa
+                  style={{
+                    border: 'none'
+
+                  }}
                 >
                   <div
                     style={{
@@ -669,6 +762,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       fontWeight: 'bold',
                       textAlign: 'justify',
                       lineHeight: 1.4,
+                      border: 'none'
+
                     }}
                   >
                   <span
@@ -676,6 +771,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       color: '#DC143C',
                       fontSize: config.fontSize.medium,
                       fontWeight: 'bold',
+                      border: 'none'
+
                     }}
                   >
                     📍 ĐIỂM NÓNG CẦN CHÚ Ý:
@@ -694,6 +791,10 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   y={config.pct(395, 'h')}
                   width={config.pct(460)}  // Giới hạn độ rộng vùng text
                   height={config.pct(400)} // Chiều cao vùng hiển thị
+                  style={{
+                    border: 'none'
+
+                  }}
                 >
                   <div
                     style={{
@@ -702,6 +803,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       lineHeight: 1.25,
                       // fontWeight: 'bold',
                       textAlign: 'justify',
+                      border: 'none'
+
                     }}
                   >
                     <div
@@ -710,6 +813,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                         color: '#0d4b59',
                         marginBottom: '0.4em',
                         fontWeight: 'bold',
+                        border: 'none'
+
                       }}
                     >
                       • ✅ KHUYẾN CÁO PHÒNG TRÁNH:
@@ -720,6 +825,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                         fontFamily: 'Arial, sans-serif',
                         fontSize: config.fontSize.tiny,
                         color: '#0d4b59',
+                        border: 'none'
+
                       }}
                     >
                       • - Di chuyển tài sản: Kê cao hoặc di chuyển các vật dụng, đồ điện tử,
@@ -745,6 +852,10 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                   y={config.pct(690, 'h')}
                   width={config.pct(460)}
                   height={config.pct(200)}
+                  style={{
+                    border: 'none'
+
+                  }}
                 >
                   <div
                     style={{
@@ -754,6 +865,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                       lineHeight: 1.25,
                       textAlign: 'justify',
                       fontStyle: 'italic',
+                      border: 'none'
+
                     }}
                   >
                     <div
@@ -763,6 +876,8 @@ export function BulletinPreview({data, onDownload, bulletins, currentIndex}: Bul
                         fontWeight: 'bold',
                         fontStyle: 'normal',
                         marginBottom: '0.3em',
+                        border: 'none'
+
                       }}
                     >
                       • 📢 Khuyến nghị:
